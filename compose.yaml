@@ -35,6 +35,7 @@ services:
       WEBAUTHN_RP_ID: ${PUBLIC_HOST:-pm.newmarketsecurity.com}
       WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-New Market Security}
       ENABLE_ADMIN_FALLBACK: ${ENABLE_ADMIN_FALLBACK:-true}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
       WINDSHIFT_MEMORY_LIMIT_MB: ${WINDSHIFT_MEMORY_LIMIT_MB:-512}
       DB_TYPE: postgres
       POSTGRES_HOST: postgres
@@ -56,7 +57,7 @@ services:
       - caddy.reverse_proxy={{upstreams 8080}}
       - traefik.enable=true
       - traefik.docker.network=${EDGE_NETWORK:-proxy}
-      - traefik.http.routers.pm.rule=Host(`${PUBLIC_HOST:-pm.newmarketsecurity.com}`)
+      - traefik.http.routers.pm.rule=Host(`${PUBLIC_HOST:-pm.newmarketsecurity.com}`) && !PathPrefix(`/ingest`)
       - traefik.http.routers.pm.entrypoints=websecure
       - traefik.http.routers.pm.tls=true
       - traefik.http.routers.pm.tls.certresolver=letsencrypt

@@ -4,12 +4,13 @@ Company project management for New Market Security. Official [Windshift](https:/
 
 Public hostname: https://pm.newmarketsecurity.com
 
-The GitHub repository stays `nms-pm` so existing `pm` host paths and docs keep working. This is not part of the Lockhaven application repo and does not share a database with Lockhaven, Keycloak, or tickets. It is not a custom project-management app: the repo is glue only.
+The GitHub repository stays `nms-pm` so existing `pm` host paths and docs keep working. This is not part of the Lockhaven application repo and does not share a database with Lockhaven or Keycloak. One Windshift instance is both project management and tickets. It is not a custom project-management app: the repo is glue only.
 
 ## What ships
 
 - Official Windshift image (`ghcr.io/windshiftapp/windshift`, pinned in `.env`)
 - Native OpenID Connect to Keycloak realm `nms` (PKCE). Configure and inspect it later under Admin > Single Sign-On
+- First-party MCP server at `/mcp` when `MCP_ENABLED=true` (Streamable HTTP, Bearer token with `mcp:access`)
 - Docker Compose project `nms-pm` on the existing `proxy` network
 - Keycloak client `pm` (created/updated by `scripts/ensure-oidc-client.sh`)
 
@@ -39,7 +40,41 @@ Do not start a second Caddy from this repo, and do not publish 80/443 here. The 
 
 HTTP stays bound to `127.0.0.1:8088`. Labels cover caddy-docker-proxy and Traefik on the `proxy` network. `USE_PROXY=true` so Windshift trusts forwarded proto/IP from that edge only.
 
-Keep project name `nms-pm`. Do not run a second Lockhaven worker from this repo. Do not start CRM or Zammad from this repo. Tickets stay in `nms-desk`.
+Keep project name `nms-pm`. Do not run a second Lockhaven worker from this repo. Do not start CRM or Zammad from this repo. There is no tickets subdomain: UI, SSO, and MCP are this host. Lockhaven HMAC ingest is the `nms-desk` sidecar on `PathPrefix(/ingest)` of the same hostname.
+
+## MCP for Grok / Cursor agents
+
+Windshift has a first-party MCP server. There is no separate marketplace package.
+
+```text
+https://pm.newmarketsecurity.com/mcp
+```
+
+Transport: Streamable HTTP. Auth: `Authorization: Bearer <api-token>`.
+Mint the token in Windshift (API tokens) with `mcp:access` plus item/workspace
+scopes. Do not put the token in git.
+
+```json
+{
+  "mcpServers": {
+    "windshift": {
+      "url": "https://pm.newmarketsecurity.com/mcp",
+      "headers": {
+        "Authorization": "Bearer TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Ingest on this host
+
+Traefik leaves `/ingest*` for the `nms-desk` sidecar. Windshift serves every
+other path. Console webhook URL:
+
+```text
+https://pm.newmarketsecurity.com/ingest/lockhaven
+```
 
 ## Sign-in
 
