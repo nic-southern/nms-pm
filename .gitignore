@@ -1,0 +1,16 @@
+# secrets and local config
+.env
+.env.*
+!.env.example
+
+# tls material
+*.pem
+*.p12
+*.pfx
+*.key
+*.crt
+
+# local state
+data/
+*.log
+.DS_Store

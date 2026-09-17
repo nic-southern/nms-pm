@@ -1,0 +1,50 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose must join the existing edge network
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("compose.yaml").read_text()
+          assert "80:80" not in text and "443:443" not in text
+          assert '"80:80"' not in text
+          assert "image: caddy" not in text.lower()
+          assert "caddy=" in text
+          assert "traefik.enable=true" in text
+          assert "EDGE_NETWORK:-proxy" in text
+          assert "external: true" in text
+          assert "makeplane/plane-frontend" in text
+          assert "oauth2-proxy" in text
+          assert "OIDC_ISSUER" in text
+          assert "127.0.0.1:${LISTEN_HTTP_PORT:-8088}:80" in text
+          assert "127.0.0.1:4180:4180" in text
+          print("compose labels look safe")
+          PY
+      - name: Compose file parses
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path(".env.example").read_text()
+          Path(".env").write_text(src.replace("replace_me", "ci-not-a-real-secret"))
+          PY
+          docker compose -f compose.yaml config --quiet
+      - name: Template must not contain live secrets
+        run: |
+          if git grep -nE 'BEGIN (RSA |OPENSSH )?PRIVATE KEY' -- ':!.github'; then
+            echo "refusing private key material" >&2
+            exit 1
+          fi
+          if git grep -nE 'postgres://[^:]+:[^@]+@' -- ':!.github' | grep -v replace_me | grep -Fv '${'; then
+            echo "refusing inline database URLs with passwords" >&2
+            exit 1
+          fi
+          grep -q 'replace_me' .env.example
