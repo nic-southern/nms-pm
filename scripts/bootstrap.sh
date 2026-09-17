@@ -75,7 +75,11 @@ req = urllib.request.Request(
     f"{base}/api/setup/complete",
     data=body,
     method="POST",
-    headers={"Content-Type": "application/json"},
+    headers={
+        "Content-Type": "application/json",
+        "Sec-Fetch-Site": "same-origin",
+        "Origin": base,
+    },
 )
 try:
     with urllib.request.urlopen(req, timeout=30) as resp:
