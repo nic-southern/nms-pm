@@ -7,5 +7,5 @@ This repository must never contain:
 
 - `.env` files
 - TLS private keys
-- OIDC client secrets, cookie secrets, or database passwords
+- OIDC client secrets, SSO signing secrets, or database passwords
 - real project titles, issue contents, or user lists

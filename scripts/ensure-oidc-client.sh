@@ -1,5 +1,5 @@
 #!/bin/sh
-# Create or update the Plane OIDC client on the live nms realm. Run on the droplet.
+# Create or update the Windshift OIDC client on the live nms realm. Run on the droplet.
 # Reads only the keys it needs and does not print secrets.
 set -eu
 
@@ -32,7 +32,9 @@ PY
 PUBLIC_URL=$(env_get "$PM_ENV" PUBLIC_URL)
 PUBLIC_URL=${PUBLIC_URL:-https://pm.newmarketsecurity.com}
 CLIENT_ID=$(env_get "$PM_ENV" OIDC_CLIENT_ID)
-CLIENT_ID=${CLIENT_ID:-plane}
+CLIENT_ID=${CLIENT_ID:-pm}
+OIDC_SLUG=$(env_get "$PM_ENV" OIDC_SLUG)
+OIDC_SLUG=${OIDC_SLUG:-nms}
 OIDC_CLIENT_SECRET=$(env_get "$PM_ENV" OIDC_CLIENT_SECRET)
 KC_BOOTSTRAP_ADMIN_USERNAME=$(env_get "$IDP_ENV" KC_BOOTSTRAP_ADMIN_USERNAME)
 KC_BOOTSTRAP_ADMIN_PASSWORD=$(env_get "$IDP_ENV" KC_BOOTSTRAP_ADMIN_PASSWORD)
@@ -53,8 +55,12 @@ kcadm config credentials \
   --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
   --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
 
-CLIENT_UUID=$(kcadm get clients -r nms -q "clientId=$CLIENT_ID" --fields id,clientId \
-  | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+client_uuid() {
+  kcadm get clients -r nms -q "clientId=$1" --fields id,clientId \
+    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^\"]*\)".*/\1/p' | head -n 1
+}
+
+CLIENT_UUID=$(client_uuid "$CLIENT_ID")
 
 if [ -z "$CLIENT_UUID" ]; then
   kcadm create clients -r nms \
@@ -69,8 +75,7 @@ if [ -z "$CLIENT_UUID" ]; then
     -s "directAccessGrantsEnabled=false" \
     -s "frontchannelLogout=true" \
     >/dev/null
-  CLIENT_UUID=$(kcadm get clients -r nms -q "clientId=$CLIENT_ID" --fields id,clientId \
-    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  CLIENT_UUID=$(client_uuid "$CLIENT_ID")
 fi
 
 if [ -z "$CLIENT_UUID" ]; then
@@ -79,13 +84,22 @@ if [ -z "$CLIENT_UUID" ]; then
 fi
 
 kcadm update "clients/$CLIENT_UUID" -r nms \
+  -s "enabled=true" \
   -s "secret=$OIDC_CLIENT_SECRET" \
   -s "rootUrl=$PUBLIC_URL" \
   -s "baseUrl=$PUBLIC_URL" \
-  -s 'redirectUris=["'"$PUBLIC_URL"'/oauth2/callback","'"$PUBLIC_URL"'/auth/oidc/callback/"]' \
+  -s 'redirectUris=["'"$PUBLIC_URL"'/api/sso/callback/'"$OIDC_SLUG"'"]' \
   -s 'webOrigins=["'"$PUBLIC_URL"'"]' \
   -s 'attributes."pkce.code.challenge.method"=S256' \
   -s 'attributes."post.logout.redirect.uris"="'"$PUBLIC_URL"'/*"' \
   >/dev/null
 
-echo "updated realm nms client $CLIENT_ID redirect URIs for $PUBLIC_URL"
+# Plane + oauth2-proxy used client "plane". Disable it so operators are not
+# offered a leftover second client after the Windshift cutover.
+PLANE_UUID=$(client_uuid plane)
+if [ -n "$PLANE_UUID" ] && [ "$CLIENT_ID" != "plane" ]; then
+  kcadm update "clients/$PLANE_UUID" -r nms -s "enabled=false" >/dev/null
+  echo "disabled leftover realm nms client plane"
+fi
+
+echo "updated realm nms client $CLIENT_ID redirect URI $PUBLIC_URL/api/sso/callback/$OIDC_SLUG"

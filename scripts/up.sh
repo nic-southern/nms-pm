@@ -13,7 +13,7 @@ set -a
 . ./.env
 set +a
 
-if grep -q 'replace_me' .env; then
+if grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*replace_me' .env >/dev/null; then
   echo "replace every replace_me value in .env before starting" >&2
   exit 1
 fi
