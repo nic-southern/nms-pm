@@ -10,11 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Compose must join the existing edge network
         run: |
           python3 - <<'PY'
           from pathlib import Path
           text = Path("compose.yaml").read_text()
+          env = Path(".env.example").read_text()
           assert "80:80" not in text and "443:443" not in text
           assert '"80:80"' not in text
           assert "image: caddy" not in text.lower()
@@ -22,11 +26,13 @@ jobs:
           assert "traefik.enable=true" in text
           assert "EDGE_NETWORK:-proxy" in text
           assert "external: true" in text
-          assert "makeplane/plane-frontend" in text
-          assert "oauth2-proxy" in text
-          assert "OIDC_ISSUER" in text
-          assert "127.0.0.1:${LISTEN_HTTP_PORT:-8088}:80" in text
-          assert "127.0.0.1:4180:4180" in text
+          assert "ghcr.io/windshiftapp/windshift" in text
+          assert "USE_PROXY" in text
+          assert "127.0.0.1:${LISTEN_HTTP_PORT:-8088}:8080" in text
+          assert "oauth2-proxy" not in text.lower()
+          assert "makeplane" not in text.lower()
+          assert "OIDC_ISSUER" in env
+          assert "realms/nms" in env
           print("compose labels look safe")
           PY
       - name: Compose file parses
@@ -37,6 +43,10 @@ jobs:
           Path(".env").write_text(src.replace("replace_me", "ci-not-a-real-secret"))
           PY
           docker compose -f compose.yaml config --quiet
+      - name: SSO secret encryption round-trip
+        run: |
+          python3 -m pip install -q cryptography
+          python3 scripts/seed-oidc.py --self-test
       - name: Template must not contain live secrets
         run: |
           if git grep -nE 'BEGIN (RSA |OPENSSH )?PRIVATE KEY' -- ':!.github'; then

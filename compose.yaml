@@ -1,291 +1,82 @@
 name: nms-pm
 
-x-db-env: &db-env
-  PGHOST: ${PGHOST:-plane-db}
-  PGDATABASE: ${PGDATABASE:-plane}
-  POSTGRES_USER: ${POSTGRES_USER:-plane}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-  POSTGRES_DB: ${POSTGRES_DB:-plane}
-  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-  PGDATA: /var/lib/postgresql/data
-
-x-redis-env: &redis-env
-  REDIS_HOST: ${REDIS_HOST:-plane-redis}
-  REDIS_PORT: ${REDIS_PORT:-6379}
-  REDIS_URL: ${REDIS_URL:-redis://plane-redis:6379/}
-
-x-minio-env: &minio-env
-  MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
-  MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
-
-x-aws-s3-env: &aws-s3-env
-  AWS_REGION: ${AWS_REGION:-}
-  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in .env}
-  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in .env}
-  AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://plane-minio:9000}
-  AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
-
-x-app-env: &app-env
-  WEB_URL: ${WEB_URL:-https://pm.newmarketsecurity.com}
-  DEBUG: ${DEBUG:-0}
-  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://pm.newmarketsecurity.com}
-  GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
-  USE_MINIO: ${USE_MINIO:-1}
-  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
-  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
-  AMQP_URL: ${AMQP_URL:?set AMQP_URL in .env}
-  API_KEY_RATE_LIMIT: ${API_KEY_RATE_LIMIT:-60/minute}
-  MINIO_ENDPOINT_SSL: ${MINIO_ENDPOINT_SSL:-0}
-  LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?set LIVE_SERVER_SECRET_KEY in .env}
-  WEBHOOK_ALLOWED_IPS: ${WEBHOOK_ALLOWED_IPS:-}
-  WEBHOOK_ALLOWED_HOSTS: ${WEBHOOK_ALLOWED_HOSTS:-}
-  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-0.0.0.0/0}
-
 services:
-  web:
-    image: makeplane/plane-frontend:${APP_RELEASE:-v1.4.2}
-    restart: unless-stopped
-    mem_limit: 256m
-    depends_on:
-      api:
-        condition: service_started
-    networks:
-      - nms-pm
-
-  space:
-    image: makeplane/plane-space:${APP_RELEASE:-v1.4.2}
-    restart: unless-stopped
-    mem_limit: 192m
-    depends_on:
-      - api
-      - web
-    networks:
-      - nms-pm
-
-  admin:
-    image: makeplane/plane-admin:${APP_RELEASE:-v1.4.2}
-    restart: unless-stopped
-    mem_limit: 192m
-    depends_on:
-      - api
-      - web
-    networks:
-      - nms-pm
-
-  live:
-    image: makeplane/plane-live:${APP_RELEASE:-v1.4.2}
-    restart: unless-stopped
-    mem_limit: 128m
+  postgres:
+    image: postgres:16-alpine
     environment:
-      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
-      LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?set LIVE_SERVER_SECRET_KEY in .env}
-      <<: *redis-env
-    depends_on:
-      - api
-      - web
-    networks:
-      - nms-pm
-
-  api:
-    image: makeplane/plane-backend:${APP_RELEASE:-v1.4.2}
-    command: ./bin/docker-entrypoint-api.sh
-    restart: unless-stopped
-    mem_limit: 512m
+      POSTGRES_DB: ${POSTGRES_DB:-windshift}
+      POSTGRES_USER: ${POSTGRES_USER:-windshift}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - logs_api:/code/plane/logs
-    environment:
-      <<: [*app-env, *db-env, *redis-env, *minio-env, *aws-s3-env]
-    depends_on:
-      migrator:
-        condition: service_completed_successfully
-      plane-db:
-        condition: service_healthy
-      plane-redis:
-        condition: service_started
-      plane-mq:
-        condition: service_started
-    networks:
-      - nms-pm
-
-  worker:
-    image: makeplane/plane-backend:${APP_RELEASE:-v1.4.2}
-    command: ./bin/docker-entrypoint-worker.sh
-    restart: unless-stopped
-    mem_limit: 256m
-    volumes:
-      - logs_worker:/code/plane/logs
-    environment:
-      <<: [*app-env, *db-env, *redis-env, *minio-env, *aws-s3-env]
-    depends_on:
-      api:
-        condition: service_started
-    networks:
-      - nms-pm
-
-  beat-worker:
-    image: makeplane/plane-backend:${APP_RELEASE:-v1.4.2}
-    command: ./bin/docker-entrypoint-beat.sh
-    restart: unless-stopped
-    mem_limit: 128m
-    volumes:
-      - logs_beat-worker:/code/plane/logs
-    environment:
-      <<: [*app-env, *db-env, *redis-env, *minio-env, *aws-s3-env]
-    depends_on:
-      api:
-        condition: service_started
-    networks:
-      - nms-pm
-
-  migrator:
-    image: makeplane/plane-backend:${APP_RELEASE:-v1.4.2}
-    command: ./bin/docker-entrypoint-migrator.sh
-    restart: on-failure
-    mem_limit: 384m
-    volumes:
-      - logs_migrator:/code/plane/logs
-    environment:
-      <<: [*app-env, *db-env, *redis-env, *minio-env, *aws-s3-env]
-    depends_on:
-      plane-db:
-        condition: service_healthy
-      plane-redis:
-        condition: service_started
-    networks:
-      - nms-pm
-
-  plane-db:
-    image: postgres:15.7-alpine
-    command: postgres -c 'max_connections=200'
-    restart: unless-stopped
-    mem_limit: 256m
-    environment:
-      <<: *db-env
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 20
-    networks:
-      - nms-pm
-
-  plane-redis:
-    image: valkey/valkey:7.2.11-alpine
-    restart: unless-stopped
-    mem_limit: 64m
-    volumes:
-      - redisdata:/data
-    networks:
-      - nms-pm
-
-  plane-mq:
-    image: rabbitmq:3.13.6-alpine
     restart: unless-stopped
     mem_limit: 256m
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-plane}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
-      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-plane}
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
     networks:
       - nms-pm
 
-  plane-minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /export --console-address ":9090"
+  windshift:
+    image: ghcr.io/windshiftapp/windshift:${WINDSHIFT_VERSION:-v0.8.8}
     restart: unless-stopped
-    mem_limit: 128m
+    tmpfs:
+      - /tmp:exec,size=64M
+    mem_limit: ${WINDSHIFT_CONTAINER_MEMORY_LIMIT:-768m}
+    env_file: .env
     environment:
-      <<: *minio-env
+      BASE_URL: ${PUBLIC_URL:-https://pm.newmarketsecurity.com}
+      ALLOWED_HOSTS: ${PUBLIC_HOST:-pm.newmarketsecurity.com}
+      USE_PROXY: "true"
+      SSO_SECRET: ${SSO_SECRET:?set SSO_SECRET in .env}
+      SESSION_IP_BINDING: ${SESSION_IP_BINDING:-log}
+      WEBAUTHN_RP_ID: ${PUBLIC_HOST:-pm.newmarketsecurity.com}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-New Market Security}
+      ENABLE_ADMIN_FALLBACK: ${ENABLE_ADMIN_FALLBACK:-true}
+      WINDSHIFT_MEMORY_LIMIT_MB: ${WINDSHIFT_MEMORY_LIMIT_MB:-512}
+      DB_TYPE: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-windshift}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-windshift}
+      POSTGRES_SSLMODE: disable
+      ATTACHMENT_PATH: /data/attachments
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      TLS_SKIP_VERIFY: "false"
     volumes:
-      - uploads:/export
-    networks:
-      - nms-pm
-
-  # Internal Plane router only. TLS stays on the existing host Traefik.
-  proxy:
-    image: makeplane/plane-proxy:${APP_RELEASE:-v1.4.2}
-    restart: unless-stopped
-    mem_limit: 64m
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:-pm.newmarketsecurity.com}
-      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-5242880}
-      BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
-      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      - windshift_data:/data
     ports:
-      - "127.0.0.1:${LISTEN_HTTP_PORT:-8088}:80"
-    volumes:
-      - proxy_config:/config
-      - proxy_data:/data
-    depends_on:
-      - web
-      - api
-      - space
-      - admin
-      - live
-    networks:
-      - nms-pm
-
-  sso:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
-    restart: unless-stopped
-    mem_limit: 64m
-    command:
-      - --provider=keycloak-oidc
-      - --http-address=0.0.0.0:4180
-      - --reverse-proxy=true
-      - --skip-provider-button=true
-      - --code-challenge-method=S256
-      - --insecure-oidc-allow-unverified-email=true
-      - --upstream=http://proxy:80
-      - --redirect-url=${PUBLIC_URL:-https://pm.newmarketsecurity.com}/oauth2/callback
-      - --oidc-issuer-url=${OIDC_ISSUER:-https://auth.newmarketsecurity.com/realms/nms}
-      - --scope=${OIDC_SCOPES:-openid email profile}
-      - --email-domain=${OAUTH2_PROXY_EMAIL_DOMAINS:-newmarketsecurity.com}
-      - --whitelist-domain=.newmarketsecurity.com
-      - --cookie-secure=true
-      - --cookie-samesite=lax
-      - --cookie-httponly=true
-      - --pass-access-token=false
-      - --pass-user-headers=true
-      - --set-xauthrequest=true
-      - --silence-ping-logging=true
-    environment:
-      OAUTH2_PROXY_CLIENT_ID: ${OIDC_CLIENT_ID:-plane}
-      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
-      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:?set OAUTH2_PROXY_COOKIE_SECRET in .env}
-    ports:
-      - "127.0.0.1:4180:4180"
+      - "127.0.0.1:${LISTEN_HTTP_PORT:-8088}:8080"
     labels:
       - caddy=${PUBLIC_HOST:-pm.newmarketsecurity.com}
-      - caddy.reverse_proxy={{upstreams 4180}}
+      - caddy.reverse_proxy={{upstreams 8080}}
       - traefik.enable=true
       - traefik.docker.network=${EDGE_NETWORK:-proxy}
       - traefik.http.routers.pm.rule=Host(`${PUBLIC_HOST:-pm.newmarketsecurity.com}`)
       - traefik.http.routers.pm.entrypoints=websecure
       - traefik.http.routers.pm.tls=true
       - traefik.http.routers.pm.tls.certresolver=letsencrypt
-      - traefik.http.services.pm.loadbalancer.server.port=4180
+      - traefik.http.services.pm.loadbalancer.server.port=8080
     depends_on:
-      - proxy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/windshift", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       nms-pm: {}
       edge: {}
 
 volumes:
-  pgdata:
-  redisdata:
-  uploads:
-  logs_api:
-  logs_worker:
-  logs_beat-worker:
-  logs_migrator:
-  rabbitmq_data:
-  proxy_config:
-  proxy_data:
+  postgres_data:
+  windshift_data:
 
 networks:
   nms-pm:
