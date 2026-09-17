@@ -25,7 +25,7 @@ DEFAULT_ATTRIBUTE_MAPPING = (
 
 
 def hkdf_sha256(ikm: bytes, info: bytes, length: int = 32) -> bytes:
-    prk = hmac.new(b"\\x00" * 32, ikm, hashlib.sha256).digest()
+    prk = hmac.new(bytes(32), ikm, hashlib.sha256).digest()
     okm = b""
     block = b""
     counter = 1
